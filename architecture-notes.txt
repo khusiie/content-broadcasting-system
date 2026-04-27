@@ -1,0 +1,92 @@
+Architecture Notes - Content Broadcasting System
+
+1. Authentication & RBAC Flow
+- Implementation: JWT (JSON Web Token) based authentication.
+- Flow: 
+  - Users register/login via `/api/auth`.
+  - On successful login, a JWT is issued containing user ID, role, and name.
+  - Middleware `authenticate` verifies the token for protected routes.
+  - Middleware `authorize` enforces role-based access (Principal vs. Teacher).
+  - Principal: Can view all content, approve, reject (with mandatory reason).
+  - Teacher: Can upload content, view own content status. Cannot approve/reject.
+
+2. Subject-based System Design
+- Content is tagged with a `subject` field (e.g., Maths, Science).
+- Subject slots are managed via `content_slots` table — auto-created on first upload.
+- Each subject has independent rotation schedules.
+- The system groups content by subject when determining live rotation.
+
+3. Upload Handling Approach
+- Library: Multer for handling multipart/form-data.
+- Storage: Supabase Storage (S3-compatible) primary, local filesystem fallback.
+- Validation: File type limits (JPG, PNG, GIF) and size limits (10MB) at middleware level.
+- Database: Public URLs stored in PostgreSQL for quick retrieval.
+- Lifecycle: File uploaded → content record created as 'uploaded' → auto-transitions to 'pending'.
+
+4. Approval Workflow Design
+- Status Lifecycle: uploaded → pending → approved / rejected.
+  - `uploaded`: Initial state when content is first created.
+  - `pending`: Content is ready for principal review.
+  - `approved`: Content is eligible for broadcasting (within schedule window).
+  - `rejected`: Content is rejected with mandatory reason visible to teacher.
+- Logic: Only users with 'principal' role can access `/api/approval` routes.
+- Validation: Rejection requires a non-empty reason (server-side enforced).
+- Guard: Already-processed content cannot be re-approved/re-rejected.
+
+5. Scheduling/Rotation Logic (IMPORTANT)
+- Determination: Active content is determined dynamically using current server time.
+- Eligibility: Content must be 'approved' AND within the `start_time`/`end_time` window.
+  - Without start_time/end_time: Content is never active (by design).
+  - Within time window: Eligible for rotation.
+  - Outside time window: Not shown.
+- Rotation Algorithm:
+  - Content schedule entries (content_schedule table) define rotation_order and duration.
+  - Fallback: If no schedule entries, uses content.rotation_duration.
+  - Calculate total duration of all active items for a subject.
+  - Calculate current "minute in rotation" using `(CurrentTimeMillis / 60000) % TotalDuration`.
+  - Iterate through items to find which one covers the current minute.
+  - This ensures continuous, looping rotation without manual intervention.
+- Tables Used:
+  - content_slots: Subject-based grouping (auto-created per subject).
+  - content_schedule: Rotation order and duration per content item.
+
+6. Database Design Decisions
+- PostgreSQL (via Supabase): Strong relational support and RLS capabilities.
+- Foreign Keys: Links content to users for audit trails (uploaded_by, approved_by).
+- Tables: users, content, content_slots, content_schedule.
+- Status CHECK: ('uploaded', 'pending', 'approved', 'rejected').
+- Indexing: Suggested on `uploaded_by`, `status`, `subject` for query performance.
+
+7. Folder Structure
+- src/controllers: Business logic for handling requests.
+- src/routes: API endpoint definitions.
+- src/middlewares: Auth and validation logic.
+- src/services: Core algorithmic logic (scheduling/rotation).
+- src/utils: Helpers (Supabase client).
+
+8. Middleware Usage
+- Morgan: HTTP request logging.
+- CORS: Cross-origin resource sharing for frontend.
+- Express.json: JSON body parsing.
+- Multer: Multipart file upload handling with type/size validation.
+- Custom Auth: JWT verification (authenticate) + RBAC enforcement (authorize).
+
+9. Scalability Approach
+- Caching: Redis can cache /content/live responses to reduce DB load.
+- Queues: Asynchronous file processing for high-volume uploads.
+- Database: Supabase/PostgreSQL supports read-replicas for broadcasting traffic.
+- Pagination: Server-side pagination on all list endpoints.
+
+10. Edge Case Handling
+- No content available: Returns empty response with message.
+- Approved but not scheduled: Returns empty (no start_time/end_time = not active).
+- Invalid subject: Returns empty response (not error).
+- Expired content: Outside end_time = not shown.
+- Re-processing guard: Already approved/rejected content cannot be changed.
+
+11. Public API
+- Endpoint: GET /content/live/:teacherId (per assignment spec)
+- Also available at: GET /api/public/live/:teacherId (internal)
+- Returns only approved content within active time window.
+- Applies per-subject rotation logic.
+- No authentication required (public endpoint).
