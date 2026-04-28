@@ -12,7 +12,7 @@ const supabase = require('../utils/supabase');
  */
 exports.getActiveContentForTeacher = async (teacherId, subjectFilter = null) => {
   const now = new Date();
-
+  console.log("NOW:", now);
   // 1. Fetch approved content for this teacher within schedule window
   let query = supabase
     .from('content')
@@ -45,6 +45,9 @@ exports.getActiveContentForTeacher = async (teacherId, subjectFilter = null) => 
   // 3. For each subject, find the active content in rotation
   for (const subject in subjects) {
     const subjectItems = subjects[subject];
+    console.log("CONTENT ID:", content.id);
+    console.log("START:", content.start_time);
+    console.log("END:", content.end_time);
 
     // Try to get schedule entries for rotation order
     const contentIds = subjectItems.map(c => c.id);

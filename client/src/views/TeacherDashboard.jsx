@@ -31,8 +31,20 @@ const TeacherDashboard = () => {
     if (!file) return alert('Please select a file');
     setUploading(true);
     const data = new FormData();
-    Object.keys(formData).forEach(key => { if (formData[key]) data.append(key, formData[key]); });
-    data.append('file', file);
+    // ✅ FIXED VERSION
+    data.append('title', formData.title);
+    data.append('subject', formData.subject);
+    data.append('description', formData.description);
+    data.append('rotation_duration', formData.rotation_duration);
+
+    // 🔥 TIME FIX (VERY IMPORTANT)
+    if (formData.start_time) {
+      data.append('start_time', new Date(formData.start_time).toISOString());
+    }
+
+    if (formData.end_time) {
+      data.append('end_time', new Date(formData.end_time).toISOString());
+    }
     try {
       await api.post('/content/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert('Content uploaded successfully!');
